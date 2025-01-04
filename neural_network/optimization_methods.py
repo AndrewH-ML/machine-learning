@@ -1,5 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt 
+import math
 
 def update_parameters_with_gd(parameters, grads, learning_rate):
     """
@@ -62,7 +63,7 @@ def random_mini_batches(X, Y, mini_batch_size = 64, seed = 0):
 
         mini_batch_X = shuffled_X[:, (k+1)*inc:]
         mini_batch_Y = shuffled_Y[:, (k+1)*inc:]
-        mini_batch = (mini_batch_X, mini_batch_Y)
+        mini_batch = (mini_batch_X, mini_batch_Y) 
         mini_batches.append(mini_batch)
     
     return mini_batches
@@ -240,7 +241,7 @@ def update_lr(learning_rate0, epoch_num, decay_rate):
     return learning_rate
 
 
-def schedule_lr_decay(learning_rate0, epoch_num, decay_rate, time_interval=1000):
+def schedule_lr_decay(learning_rate0, epoch_num, decay_rate, time_interval=100):
     """
     Calculates updated the learning rate using exponential weight decay.
     

@@ -1,7 +1,8 @@
 # neural_net.py
-
-import numpy as np 
-
+import sys
+import os
+import numpy as np
+from optimization_methods import *
 
 def sigmoid(Z):
     """
@@ -128,7 +129,7 @@ def linear_forward(A, W, b):
 
 def linear_activation_forward(A_prev, W, b, activation):
     """
-    Implement the forward propagation for the LINEAR->ACTIVATION layer
+    Implement the forward propagation for the LINEAR->ACTIVATION layer 
 
     Arguments:
     A_prev -- activations from previous layer (or input data): (size of previous layer, number of examples)
@@ -149,7 +150,7 @@ def linear_activation_forward(A_prev, W, b, activation):
         A, activation_cache = relu(Z)
 
     #linear_cache contains A_prev, W, b used for forward pass
-    #activation_cache contains output of activation func
+    #activation_cache contains pre-activation value z
     cache = (linear_cache, activation_cache)
 
     return A, cache
@@ -177,7 +178,8 @@ def model_forward(X, parameters):
     for l in range(1, L):
         A_prev = A
         # use relu for forward pass
-        A, cache = linear_activation_forward(A_prev, parameters['W' + str(l)], parameters['b' + str(l)], 'relu')
+        A, cache = linear_activation_forward(A_prev, parameters['W' + str(l)], 
+                                             parameters['b' + str(l)], 'relu')
         #cache contains both linear_cache and activation_cache
         caches.append(cache)
     #compute forward pass for output layer
@@ -201,13 +203,40 @@ def compute_cost(AL, Y):
 
     #get num of training examples
     m = Y.shape[1]
+
     cost = (1./m) * (-np.dot(Y, np.log(AL).T) - np.dot(1-Y, np.log(1-AL).T))
 
-    # To make sure your cost's shape is what we expect (e.g. this turns [[17]] into 17)
+    # To make sure cost's shape is whats expected (e.g. this turns [[17]] into 17)
     # np.squeeze ensures we have the correct shape, e.g instead of [[x]], we get X
     cost = np.squeeze(cost)
 
     return cost
+
+def compute_cost_with_regularization(AL, Y, parameters, lambd, l2):
+    """
+    Compute the cost with or without L2 regularization.
+
+    Arguments:
+    AL -- post-activation, output of forward propagation, shape (output size, number of examples)
+    Y -- true labels, shape (output size, number of examples)
+    parameters -- dictionary containing W and b
+    lambd -- regularization hyperparameter
+    l2 -- boolean, whether to include L2 regularization
+
+    Returns:
+    cost -- regularized or standard cost
+    """
+    m = Y.shape[1]
+    cross_entropy_cost = compute_cost(AL, Y)
+    if l2:
+        l2_regularization_cost = (lambd / (2 * m)) * sum([np.sum(np.square(parameters['W' + str(l)]))
+                                      for l in range (1,len(parameters)//2)])
+        cost = cross_entropy_cost + l2_regularization_cost
+    else:
+        cost = cross_entropy_cost
+
+    return cost
+
 
 def linear_backward(dZ, cache):
     #get params
@@ -296,6 +325,59 @@ def model_backward(AL, Y, caches):
 
     return grads
 
+def model_backward_with_regularization(AL, Y, caches, parameters, lambd, l2=False):
+    """
+    Implement the backward propagation for the [LINEAR->RELU] * (L-1) -> LINEAR -> SIGMOID group
+
+    Arguments:
+    AL -- probability vector, output of the forward propagation (L_model_forward())
+    Y -- true "label" vector (containing 0 if non-cat, 1 if cat)
+    caches -- list of caches containing:
+                every cache of linear_activation_forward() with "relu" (it's caches[l], for l in range(L-1) i.e l = 0...L-2)
+                the cache of linear_activation_forward() with "sigmoid" (it's caches[L-1])
+    refularization -- determines if and what form of regularization to use (l2, dropout)
+
+    Returns:
+    grads -- A dictionary with the gradients
+             grads["dA" + str(l)] = ...
+             grads["dW" + str(l)] = ...
+             grads["db" + str(l)] = ...
+    """
+    #create dictionary to save gradients
+    grads = {}
+    #number of layers in network
+    L = len(caches)
+    m = AL.shape[1]
+    Y = Y.reshape(AL.shape) # make Y same shape as AL
+
+    #initialize backprop
+    dAL = - (np.divide(Y, AL) - np.divide(1 - Y, 1 - AL))
+
+    #performing backward pass for output layer using sigmoid_backward choice
+    current_cache = caches[L-1]
+    dA_prev_temp, dW_temp, db_temp = linear_activation_backward(dAL, current_cache, 'sigmoid')
+
+    if l2:
+        dW_temp +=  (lambd/m) * parameters['W' + str(L)]
+
+    #store gradients
+    grads["dA" + str(L-1)] = dA_prev_temp
+    grads["dW" + str(L)] = dW_temp
+    grads["db" + str(L)] = db_temp
+
+    # loop in reverse from l = L-2 to l = 0
+    for l in reversed(range(L-1)):
+        current_cache = caches[l]
+        dA_prev_temp, dW_temp, db_temp = linear_activation_backward(grads["dA"+str(l+1)], current_cache, 'relu')
+        if l2:
+            dW_temp +=  (lambd/2) * parameters['W' + str(l+1)]
+        grads["dA" + str(l)] = dA_prev_temp
+        grads["dW" + str(l+1)] = dW_temp
+        grads["db" + str(l+1)] = db_temp
+
+    return grads
+        
+    
 def update_parameters(params, grads, learning_rate):
     """
     Update parameters using gradient descent
@@ -333,30 +415,36 @@ def predict(X, parameters, y=None):
     p -- predictions for the given dataset X
     """
 
-    m = X.shape[1]
-    n = len(parameters) // 2 # number of layers in the neural network
-    p = np.zeros((1,m))
-
     # Forward propagation
     probas, caches = model_forward(X, parameters)
 
     # convert probas to 0/1 predictions
-    for i in range(0, probas.shape[1]):
-        if probas[0,i] > 0.5:
-            p[0,i] = 1
-        else:
-            p[0,i] = 0
+    p = (probas > 0.5).astype(int)
 
-    #print results
-    #print ("predictions: " + str(p))
-    #print ("true labels: " + str(y))
-    if(y): 
-        print("Accuracy: "  + str(np.sum((p == y)/m)))
-    return p
+    if(y is not None): 
+        
+        tp = np.sum((p == 1) & (y == 1))
+        tn = np.sum((p == 0) & (y == 0))
+        fp = np.sum((p == 1) & (y == 0))
+        fn = np.sum((p == 0) & (y == 1))
+
+        accuracy = (tp + tn) / (tp + tn + fp + fn)
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall  = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1_score = 2 * ((precision * recall)/(precision + recall)) if (precision + recall) > 0 else 0
+        
+        metrics = {
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1_score,
+        }
+
+    return metrics, p
 
 
 
-def learn(X, Y, layers_dims, learning_rate = 0.01, num_iterations=2000, print_cost=True):
+def model_1(X, Y, layers_dims, learning_rate = 0.01, num_iterations=2000, print_cost=True):
     """
     Implements a L-layer neural network: [LINEAR->RELU]*(L-1)->LINEAR->SIGMOID.
 
@@ -396,13 +484,228 @@ def learn(X, Y, layers_dims, learning_rate = 0.01, num_iterations=2000, print_co
       
     return parameters, costs
 
-######
-# want this function to plot learning curves, 
+def model_2_optimized(X, Y, layers_dims, optimizer, learning_rate = 0.0007, mini_batch_size = 64, beta = 0.9,
+          beta1 = 0.9, beta2 = 0.999,  epsilon = 1e-8, num_epochs=500, print_cost=True, decay=None, decay_rate=1):
+    """
+    Implements a L-layer neural network: [LINEAR->RELU]*(L-1)->LINEAR->SIGMOID.
 
-# def plot()
-#####
+    Arguments:
+    X -- data, numpy array of shape (num_px * num_px * 3, number of examples)
+    Y -- true "label" vector (containing 0 if cat, 1 if non-cat), of shape (1, number of examples)
+    layers_dims -- list containing the input size and each layer size, of length (number of layers + 1).
+    learning_rate -- learning rate of the gradient descent update rule
+    mini_batch_size -- number of examples desired in each mini batch of examples
+    beta -- the beta parameter used for momentum
+    beta1, beta2 -- the beta parameters used for adam optimization
+    num_epochs -- number of passes through entire batch
+    print_cost -- if True, it prints the cost every 100 steps
+    decay -- can be used for scheduled or adaptive learning rate decay
 
-#####
-# def preprocess()
-# want this function to preprocess mri images and detect color, dimension
-#####
+    Returns:
+    parameters -- parameters learnt by the model. They can then be used to predict.
+    """
+    # collect costs
+    costs = []
+    # intialize counter, t, for Adam update 
+    t = 0
+    #number of training examples
+    m = X.shape[1]
+    lr_rates = []
+    learning_rate_0 = learning_rate
+
+    #initialize our params
+    parameters = initialize_parameters(layers_dims)
+
+    # Initialize optimizer
+    if optimizer == "gd":
+            pass
+    elif optimizer == "momentum":
+        v = initialize_velocity(parameters)
+    elif optimizer == "adam":
+        v, s = initialize_adam(parameters)
+
+    seed = 0
+        
+    for i in range(num_epochs):
+        # increment seed to randomize shuffle
+        seed = seed + 1
+        minibatches = random_mini_batches(X, Y, mini_batch_size, seed)
+        cost = 0
+      
+        for minibatch in minibatches:
+
+            (minibatch_X, minibatch_Y) = minibatch
+
+            #forward prop
+            AL, caches = model_forward(minibatch_X, parameters)
+            #compute cost
+            cost += compute_cost(AL, minibatch_Y)
+            #backwardprop
+            grads = model_backward(AL, minibatch_Y, caches)
+
+            if optimizer == "gd":
+                parameters = update_parameters_with_gd(parameters, grads, learning_rate)
+            elif optimizer == "momentum":
+                parameters, v = update_parameters_with_momentum(parameters, grads, v, beta, learning_rate)
+            elif optimizer == "adam":
+                t = t + 1 
+                parameters, v, s, _, _ = update_parameters_with_adam(parameters, grads, v, s, t, 
+                                                learning_rate, beta1, beta2, epsilon)
+        
+        average_cost = cost/m
+
+        if decay:
+            learning_rate = decay(learning_rate_0, i, decay_rate)
+
+        if ((print_cost==True) and ((i%5)==0)):
+            print ("Cost after epoch %i: %f" %(i, average_cost))
+            if decay:
+                print("learning rate after epoch: %i : %f" % (i, learning_rate))
+
+        if print_cost:
+            costs.append(average_cost)
+
+    plt.plot(costs)
+    plt.ylabel('cost')
+    plt.xlabel('epochs')
+    plt.title("Learning rate = " + str(learning_rate))
+    plt.show()
+
+    return parameters
+
+def model_3(X, Y, layers_dims, optimizer, mini_batch_size = 64, beta = 0.9,
+          beta1 = 0.9, beta2 = 0.999,  epsilon = 1e-8, num_epochs=500, print_cost=True, decay=None,
+            l2_regularization=False, learning_rate = 0.0007, decay_rate = 1, lambd = 0):
+    """
+    Implements a L-layer neural network: [LINEAR->RELU]*(L-1)->LINEAR->SIGMOID.
+
+    Arguments:
+    X -- data, numpy array of shape (num_px * num_px * 3, number of examples)
+    Y -- true "label" vector (containing 0 if cat, 1 if non-cat), of shape (1, number of examples)
+    layers_dims -- list containing the input size and each layer size, of length (number of layers + 1).
+    learning_rate -- learning rate of the gradient descent update rule
+    mini_batch_size -- number of examples desired in each mini batch of examples
+    beta -- the beta parameter used for momentum
+    beta1, beta2 -- the beta parameters used for adam optimization
+    num_epochs -- number of passes through entire batch
+    print_cost -- prints cost changes if True
+    decay -- can be used for scheduled or adaptive learning rate decay
+
+    Returns:
+    parameters -- parameters learnt by the model. They can then be used to predict.
+    """
+    # collect costs
+    costs = []
+    # intialize counter, t, for Adam update 
+    t = 0
+    #number of training examples
+    m = X.shape[1]
+    lr_rates = []
+    learning_rate_0 = learning_rate
+    
+    #initialize our params
+    parameters = initialize_parameters(layers_dims)
+
+    # Initialize optimizer
+    if optimizer == "gd":
+            pass
+    elif optimizer == "momentum":
+        v = initialize_velocity(parameters)
+    elif optimizer == "adam":
+        v, s = initialize_adam(parameters)
+
+    seed = 0
+        
+    for i in range(num_epochs):
+        # increment seed to randomize shuffle
+        seed = seed + 1
+        minibatches = random_mini_batches(X, Y, mini_batch_size, seed)
+        cost = 0
+      
+        for minibatch in minibatches:
+
+            (minibatch_X, minibatch_Y) = minibatch
+
+            #forward prop
+            AL, caches = model_forward(minibatch_X, parameters)
+            #compute cost
+            cost += compute_cost_with_regularization(AL, minibatch_Y, parameters=parameters,
+                                                      l2=l2_regularization, lambd=lambd)
+            #backwardprop
+            grads = model_backward_with_regularization(AL, minibatch_Y, caches = caches, parameters=parameters,
+                                                        l2=l2_regularization, lambd=lambd)
+
+            if optimizer == "gd":
+                parameters = update_parameters_with_gd(parameters, grads, learning_rate)
+            elif optimizer == "momentum":
+                parameters, v = update_parameters_with_momentum(parameters, grads, v, beta, learning_rate)
+            elif optimizer == "adam": 
+                t = t + 1 
+                parameters, v, s, _, _ = update_parameters_with_adam(parameters, grads, v, s, t, 
+                                                learning_rate, beta1, beta2, epsilon)
+        
+        average_cost = cost/m
+
+        if decay:
+            learning_rate = decay(learning_rate_0, i, decay_rate)
+
+        if ((print_cost==True) and ((i%5)==0)):
+            print ("Cost after epoch %i: %f" %(i, average_cost))
+            if decay:
+                print("learning rate after epoch: %i : %f" % (i, learning_rate))
+
+        
+        costs.append(average_cost)
+
+    # plt.plot(costs)
+    # plt.ylabel('cost')
+    # plt.xlabel('epochs')
+    # plt.title("Learning rate = " + str(learning_rate))
+    # plt.show()
+
+    return parameters, costs
+
+def search_params(model, X_train, X_test, Y_train, Y_test, params, lr_0s, decay_rates, lambds):
+    
+    scores = {}
+
+    for lr in lr_0s:
+        for decay_rate in decay_rates:
+            for lambd in lambds:
+                # train model
+                # report training and test
+
+                print(f"Evaluating Model with Parameters: lr={lr}, decay={decay_rate}, λ={lambd}")
+
+                parameters, costs = model(X_train, Y_train, *params, learning_rate = lr, decay_rate = decay_rate, 
+                                   lambd = lambd)
+                
+                             # Evaluate metrics
+
+                train_metrics, _ = predict(X_train, parameters, Y_train)
+                test_metrics, _ = predict(X_test, parameters, Y_test)
+                
+                scores[f"lr={lr}_decay={decay_rate}_lambda={lambd}"] = {
+                    "train": train_metrics,
+                    "test": test_metrics
+                }
+
+                plt.plot(costs, label=f"lr={lr}, decay={decay_rate}, λ={lambd}")
+                plt.xlabel('Epochs')
+                plt.ylabel('Cost')
+                plt.title('Cost per Epoch')
+                plt.legend(loc='upper right', fontsize='small')
+                plt.show()
+
+                print("  Training Metrics:", train_metrics)
+                print("  Testing Metrics:", test_metrics)
+                print("-" * 50)
+
+    plt.xlabel('Epochs')
+    plt.ylabel('Cost')
+    plt.title('Cost per Epoch for Various Hyperparameters')
+    plt.legend(loc='upper right', fontsize='small')
+    plt.show()
+
+    return scores
+ 
