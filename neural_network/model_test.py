@@ -11,9 +11,6 @@ from sklearn.model_selection import train_test_split
 import os 
 
 
-#get current directory
-
-
 path = "/home/andrewh/tumor-prediction/data/mri/"
 
 # im = np.array(Image.open(os.path.join(path, "yes/y0.jpg")).resize((200,200)))
@@ -76,53 +73,32 @@ print("Standardizing data... \n")
 X_train, X_test = X_train/255., X_test/255.
 print("Data Standardized...")
 
-
+np.savez('train_test.npz', X_train=X_train, Y_train=Y_train, 
+         X_test=X_test, Y_test=Y_test)
+ 
 layers_dims = [X_train.shape[0], 20, 7, 5, 3, 1] #  4-layer model
 
+optimizers = ['momentum', 'adam']
 lr_0s = [.001, .01, .1]
-decay_rates = [.001, .005, .01, .05, .1]
-lambds = [.001, .01, .1, 1, 10]
-optimizer = 'adam'
+decay_rates = [.001, .01, .1]
+lambds = [0]
+
 mini_batch_size = 64
-beta = 0.9
-beta1 = 0.9
-beta2 = 0.999
-epsilon = 1e-8
-num_epochs = 100
+beta = 0.9 # default model 3 value
+beta1 = 0.9 # default 
+beta2 = 0.999 # default 
+epsilon = 1e-8 # default
+num_epochs = 40
 print_cost = False
 decay = update_lr
-l2_regularization = True
 
-params = [layers_dims, optimizer, mini_batch_size, beta, beta1, beta2, epsilon, 
-          num_epochs, print_cost, decay, l2_regularization]
 
-scores = search_params(model_3, X_train, X_test, Y_train, Y_test, params, lr_0s, decay_rates, lambds)
+params = [layers_dims, mini_batch_size, beta, beta1, beta2, epsilon, 
+          num_epochs, print_cost, decay]
+
+scores = search_params(model_3, X_train, X_test, Y_train, Y_test, params, optimizers, lr_0s, decay_rates, lambds)
 
 with open('scores.json', 'w') as f:
     json.dump(scores, f, indent=4)
 
 print("Scores saved to scores.json")
-# parameters_nonregularized = model_2_optimized(X_train, Y_train, layers_dims, optimizer = "adam", mini_batch_size = 64,
-#                learning_rate=lr_0, decay = update_lr, decay_rate = decay_rate,
-#                        num_epochs = 50)
-
-# print("Training set metrics non-regularized: ", predict(X_train, parameters_nonregularized, Y_train)[0])
-# print("Test set metrics non-regularized:", predict(X_test, parameters_nonregularized, Y_test)[0])
-# # Save trained parameters using pickle
-# with open('trained_parameters_nonregularized.pkl', 'wb') as f:
-#     pickle.dump(parameters_nonregularized, f)
-
-
-
-# parameters_regularized = model_3(X_train, Y_train, layers_dims, optimizer = "adam", mini_batch_size = 64,
-#                learning_rate=lr_0, decay = update_lr, decay_rate = decay_rate,
-#                        num_epochs = 50, l2_regularization=True, lambd=lambd)
-
-# print("Training set error regularized: ", predict(X_train, parameters_regularized, Y_train)[0])
-# print("Test set error regularized:", predict(X_test, parameters_regularized, Y_test)[0])
-# with open('trained_parameters_regularized.pkl', 'wb') as f:
-#     pickle.dump(parameters_regularized, f)
-
-
-
-

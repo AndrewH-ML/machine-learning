@@ -1,3 +1,7 @@
+# optimization_methods.py
+# 1/6/25 
+
+
 import numpy as np
 from matplotlib import pyplot as plt 
 import math
@@ -56,7 +60,7 @@ def random_mini_batches(X, Y, mini_batch_size = 64, seed = 0):
 
         mini_batch_X = shuffled_X[:, k*inc:(k+1)*inc]
         mini_batch_Y = shuffled_Y[:, k*inc:(k+1)*inc]
-        mini_batch = (mini_batch_X, mini_batch_Y)
+        mini_batch = (mini_batch_X, mini_batch_Y) 
         mini_batches.append(mini_batch)
     
     if m % mini_batch_size != 0:

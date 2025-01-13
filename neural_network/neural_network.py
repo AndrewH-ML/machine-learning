@@ -98,7 +98,9 @@ def initialize_parameters(layer_dims):
                     bl -- bias vector of shape (layer_dims[l], 1)
     """
     parameters = {}
+
     L = len(layer_dims)
+    
     for l in range(1, L):
         # dimension of w is (l, l-1)
         parameters['W' + str(l)] = np.random.randn(layer_dims[l], layer_dims[l-1]) * np.sqrt(1. / layer_dims[l-1])
@@ -188,6 +190,46 @@ def model_forward(X, parameters):
 
     return AL, caches
 
+def model_forward_with_dropout(X, parameters, dropout=False, keep_prob=1):
+    """
+    Implement forward propagation for the [LINEAR->RELU]*(L-1)->LINEAR->SIGMOID computation
+    with additional dropout option to regularize activations of hidden layers
+
+    Arguments:
+    X -- data, numpy array of shape (input size, number of examples)
+    parameters -- output of initialize_parameters_deep()
+
+    Returns:
+    AL -- activation value from the output (last) layer
+    caches -- list of caches containing:
+                every cache of linear_activation_forward() (there are L of them, indexed from 0 to L-1)
+    """
+    #caches contains linear & activation cache for all layers
+    caches = []
+    A = X
+    L = len(parameters) // 2
+    dropout_masks = {}
+
+    #range iter below will forward pass w relu up to before the output layer
+    for l in range(1, L):
+        A_prev = A
+        # use relu for forward pass
+        A, cache = linear_activation_forward(A_prev, parameters['W' + str(l)], 
+                                             parameters['b' + str(l)], 'relu')
+        if dropout:
+            #cache contains both linear_cache and activation_cache
+            D = np.random.rand(A.shape[0], A.shape[1]) < keep_prob
+            A = A * D
+            A = A / keep_prob
+            dropout_masks['D' + str(l)] = D
+
+        caches.append(cache)
+    #compute forward pass for output layer
+    AL, cache = linear_activation_forward(A, parameters['W' + str(L)], parameters['b' + str(L)], 'sigmoid')
+
+    caches.append(cache)
+
+    return AL, caches, dropout_masks
 
 # implement log loss function to create learning metric
 
@@ -212,7 +254,7 @@ def compute_cost(AL, Y):
 
     return cost
 
-def compute_cost_with_regularization(AL, Y, parameters, lambd, l2):
+def compute_cost_with_regularization(AL, Y, parameters, lambd):
     """
     Compute the cost with or without L2 regularization.
 
@@ -220,20 +262,19 @@ def compute_cost_with_regularization(AL, Y, parameters, lambd, l2):
     AL -- post-activation, output of forward propagation, shape (output size, number of examples)
     Y -- true labels, shape (output size, number of examples)
     parameters -- dictionary containing W and b
-    lambd -- regularization hyperparameter
-    l2 -- boolean, whether to include L2 regularization
+    lambd -- regularization hyperparameter, value of 0 disables l2 regularization
 
     Returns:
     cost -- regularized or standard cost
     """
     m = Y.shape[1]
-    cross_entropy_cost = compute_cost(AL, Y)
-    if l2:
-        l2_regularization_cost = (lambd / (2 * m)) * sum([np.sum(np.square(parameters['W' + str(l)]))
+
+    cross_entropy_cost = (1./ m) * (-np.dot(Y, np.log(AL).T) - np.dot(1-Y, np.log(1-AL).T))
+
+    l2_regularization_cost = (lambd / (2 * m)) * sum([np.sum(np.square(parameters['W' + str(l)]))
                                       for l in range (1,len(parameters)//2)])
-        cost = cross_entropy_cost + l2_regularization_cost
-    else:
-        cost = cross_entropy_cost
+    
+    cost = cross_entropy_cost + l2_regularization_cost
 
     return cost
 
@@ -325,7 +366,7 @@ def model_backward(AL, Y, caches):
 
     return grads
 
-def model_backward_with_regularization(AL, Y, caches, parameters, lambd, l2=False):
+def model_backward_with_regularization(AL, Y, caches, parameters, lambd, dropout, dropout_masks, keep_prob):
     """
     Implement the backward propagation for the [LINEAR->RELU] * (L-1) -> LINEAR -> SIGMOID group
 
@@ -335,7 +376,7 @@ def model_backward_with_regularization(AL, Y, caches, parameters, lambd, l2=Fals
     caches -- list of caches containing:
                 every cache of linear_activation_forward() with "relu" (it's caches[l], for l in range(L-1) i.e l = 0...L-2)
                 the cache of linear_activation_forward() with "sigmoid" (it's caches[L-1])
-    refularization -- determines if and what form of regularization to use (l2, dropout)
+    regularization -- determines if and what form of regularization to use (l2, dropout)
 
     Returns:
     grads -- A dictionary with the gradients
@@ -357,8 +398,7 @@ def model_backward_with_regularization(AL, Y, caches, parameters, lambd, l2=Fals
     current_cache = caches[L-1]
     dA_prev_temp, dW_temp, db_temp = linear_activation_backward(dAL, current_cache, 'sigmoid')
 
-    if l2:
-        dW_temp +=  (lambd/m) * parameters['W' + str(L)]
+    dW_temp +=  (lambd/m) * parameters['W' + str(L)]
 
     #store gradients
     grads["dA" + str(L-1)] = dA_prev_temp
@@ -368,9 +408,19 @@ def model_backward_with_regularization(AL, Y, caches, parameters, lambd, l2=Fals
     # loop in reverse from l = L-2 to l = 0
     for l in reversed(range(L-1)):
         current_cache = caches[l]
-        dA_prev_temp, dW_temp, db_temp = linear_activation_backward(grads["dA"+str(l+1)], current_cache, 'relu')
-        if l2:
-            dW_temp +=  (lambd/2) * parameters['W' + str(l+1)]
+
+        if dropout:
+            dA_current = grads["dA" + str(l+1)] * dropout_masks["D" + str(l+1)]
+            dA_current /= keep_prob
+        
+        else: 
+            dA_current = grads["dA" + str(l+1)]
+
+        dA_prev_temp, dW_temp, db_temp = linear_activation_backward(dA_current, current_cache, 'relu')
+
+        # dw has additional l2 regularizaion term 
+        dW_temp +=  (lambd/m) * parameters['W' + str(l+1)]
+
         grads["dA" + str(l)] = dA_prev_temp
         grads["dW" + str(l+1)] = dW_temp
         grads["db" + str(l+1)] = db_temp
@@ -385,7 +435,7 @@ def update_parameters(params, grads, learning_rate):
     Arguments:
     params -- python dictionary containing your parameters
     grads -- python dictionary containing your gradients, output of L_model_backward
-
+    learning_rate -- weight associated with learning attached to gradients of w, b
     Returns:
     parameters -- python dictionary containing your updated parameters
                   parameters["W" + str(l)] = ...
@@ -573,9 +623,9 @@ def model_2_optimized(X, Y, layers_dims, optimizer, learning_rate = 0.0007, mini
 
     return parameters
 
-def model_3(X, Y, layers_dims, optimizer, mini_batch_size = 64, beta = 0.9,
-          beta1 = 0.9, beta2 = 0.999,  epsilon = 1e-8, num_epochs=500, print_cost=True, decay=None,
-            l2_regularization=False, learning_rate = 0.0007, decay_rate = 1, lambd = 0):
+def model_3(X, Y, layers_dims, mini_batch_size = 64, beta = 0.9,
+          beta1 = 0.9, beta2 = 0.999,  epsilon = 1e-8, num_epochs=500, print_cost=True, decay=None, optimizer = 'gd',
+          learning_rate = 0.0007, decay_rate = 1, lambd = 0, dropout = False, keep_prob = 1):
     """
     Implements a L-layer neural network: [LINEAR->RELU]*(L-1)->LINEAR->SIGMOID.
 
@@ -627,13 +677,14 @@ def model_3(X, Y, layers_dims, optimizer, mini_batch_size = 64, beta = 0.9,
             (minibatch_X, minibatch_Y) = minibatch
 
             #forward prop
-            AL, caches = model_forward(minibatch_X, parameters)
+            AL, caches, dropout_masks = model_forward_with_dropout(minibatch_X, parameters, dropout = dropout, 
+                                                                   keep_prob=keep_prob)
             #compute cost
-            cost += compute_cost_with_regularization(AL, minibatch_Y, parameters=parameters,
-                                                      l2=l2_regularization, lambd=lambd)
+            mb_size = minibatch_Y.shape[1]
+            cost += compute_cost_with_regularization(AL, minibatch_Y, parameters=parameters, lambd=lambd) * mb_size
             #backwardprop
-            grads = model_backward_with_regularization(AL, minibatch_Y, caches = caches, parameters=parameters,
-                                                        l2=l2_regularization, lambd=lambd)
+            grads = model_backward_with_regularization(AL, minibatch_Y, caches = caches, parameters=parameters, lambd=lambd, 
+                            dropout = dropout, dropout_masks=dropout_masks, keep_prob=keep_prob)
 
             if optimizer == "gd":
                 parameters = update_parameters_with_gd(parameters, grads, learning_rate)
@@ -644,7 +695,7 @@ def model_3(X, Y, layers_dims, optimizer, mini_batch_size = 64, beta = 0.9,
                 parameters, v, s, _, _ = update_parameters_with_adam(parameters, grads, v, s, t, 
                                                 learning_rate, beta1, beta2, epsilon)
         
-        average_cost = cost/m
+        average_cost = cost / m
 
         if decay:
             learning_rate = decay(learning_rate_0, i, decay_rate)
@@ -665,47 +716,39 @@ def model_3(X, Y, layers_dims, optimizer, mini_batch_size = 64, beta = 0.9,
 
     return parameters, costs
 
-def search_params(model, X_train, X_test, Y_train, Y_test, params, lr_0s, decay_rates, lambds):
+def search_params(model, X_train, X_test, Y_train, Y_test, params, optimizers, lr_0s, decay_rates, lambds):
     
     scores = {}
+    for optimizer in optimizers:
+        for lr in lr_0s:
+            for decay_rate in decay_rates:
+                for lambd in lambds:
+                    # train model
+                    # report training and test
 
-    for lr in lr_0s:
-        for decay_rate in decay_rates:
-            for lambd in lambds:
-                # train model
-                # report training and test
+                    print(f"Evaluating Model with Parameters: optimizer = {optimizer}, lr={lr}, decay={decay_rate}, λ={lambd}")
 
-                print(f"Evaluating Model with Parameters: lr={lr}, decay={decay_rate}, λ={lambd}")
+                    parameters, costs = model(X_train, Y_train, *params, optimizer, learning_rate = lr,
+                                            decay_rate = decay_rate, lambd = lambd)
+            
+                    # Evaluate metrics
+                    train_metrics, _ = predict(X_train, parameters, Y_train)
+                    test_metrics, _ = predict(X_test, parameters, Y_test)
+                    
+                    scores[f"optimizer={optimizer}_lr={lr}_decay={decay_rate}_lambda={lambd}"] = { 
+                        "train": train_metrics,
+                        "test": test_metrics
+                    }
 
-                parameters, costs = model(X_train, Y_train, *params, learning_rate = lr, decay_rate = decay_rate, 
-                                   lambd = lambd)
-                
-                             # Evaluate metrics
+                    plt.plot(costs, label=f"optimizer={optimizer}_lr={lr}, decay={decay_rate}, λ={lambd}")
+                    plt.xlabel('Epochs')
+                    plt.ylabel('Cost')
+                    plt.title('Cost per Epoch')
+                    plt.legend(loc='upper right', fontsize='small')
+                    plt.show()
 
-                train_metrics, _ = predict(X_train, parameters, Y_train)
-                test_metrics, _ = predict(X_test, parameters, Y_test)
-                
-                scores[f"lr={lr}_decay={decay_rate}_lambda={lambd}"] = {
-                    "train": train_metrics,
-                    "test": test_metrics
-                }
-
-                plt.plot(costs, label=f"lr={lr}, decay={decay_rate}, λ={lambd}")
-                plt.xlabel('Epochs')
-                plt.ylabel('Cost')
-                plt.title('Cost per Epoch')
-                plt.legend(loc='upper right', fontsize='small')
-                plt.show()
-
-                print("  Training Metrics:", train_metrics)
-                print("  Testing Metrics:", test_metrics)
-                print("-" * 50)
-
-    plt.xlabel('Epochs')
-    plt.ylabel('Cost')
-    plt.title('Cost per Epoch for Various Hyperparameters')
-    plt.legend(loc='upper right', fontsize='small')
-    plt.show()
+                    print("  Training Metrics:", train_metrics)
+                    print("  Testing Metrics:", test_metrics)
+                    print("-" * 50)
 
     return scores
- 
