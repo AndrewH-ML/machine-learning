@@ -2,3 +2,4 @@ numpy
 matplotlib
 Pillow 
 scikit-learn 
+tensorflow
