@@ -200,10 +200,6 @@ def conv_backward(dZ, cache):
                     db [:, :, :, c] += dZ[i, h, w, c]
 
         dA_prev[i, :, :, :] = da_prev_pad[pad:-pad, pad:-pad, :]
-                    
-    # YOUR CODE ENDS HERE
-    
-    # Making sure your output shape is correct
      
     return dA_prev, dW, db
 
@@ -217,11 +213,9 @@ def create_mask_from_window(x):
     Returns:
     mask -- Array of the same shape as window, contains a True at the position corresponding to the max entry of x.
     """    
-    # (≈1 line)
-    # mask = None
-    # YOUR CODE STARTS HERE
+    
     mask = (x == np.max(x))
-    # YOUR CODE ENDS HERE
+
     return mask
 
 def distribute_value(dz, shape):
@@ -235,17 +229,68 @@ def distribute_value(dz, shape):
     Returns:
     a -- Array of size (n_H, n_W) for which we distributed the value of dz
     """    
-    # Retrieve dimensions from shape (≈1 line)
-    # (n_H, n_W) = None
-    
-    # Compute the value to distribute on the matrix (≈1 line)
-    # average = None
-    
-    # Create a matrix where every entry is the "average" value (≈1 line)
-    # a = None
-    # YOUR CODE STARTS HERE
     n_H, n_W = shape
     average = dz / (n_H * n_W)
     a = np.ones((n_H, n_W)) * average
-    # YOUR CODE ENDS HERE
+
     return a
+
+def pool_backward(dA, cache, mode = "max"):
+    """
+    Implements the backward pass of the pooling layer
+    
+    Arguments:
+    dA -- gradient of cost with respect to the output of the pooling layer, same shape as A
+    cache -- cache output from the forward pass of the pooling layer, contains the layer's input and hparameters 
+    mode -- the pooling mode you would like to use, defined as a string ("max" or "average")
+    
+    Returns:
+    dA_prev -- gradient of cost with respect to the input of the pooling layer, same shape as A_prev
+    """
+
+    A_prev, hparameters = cache
+    
+    stride = hparameters["stride"]
+    f = np.shape(W)[0]
+    
+    m, n_H_prev, n_W_prev, n_C_prev = np.shape(A_prev)
+    m, n_H, n_W, n_C = np.shape(dA)
+    
+    dA_prev = np.zeros((m, n_H_prev, n_W_prev, n_C))
+    
+    for i in range(m):
+        a_prev = A_prev[i]
+        for h in range(n_H):
+            for w in range(n_W):
+                for c in range(n_C):
+                    vert_start = h * stride
+                    vert_end = vert_start + f   
+                    horiz_start = w * stride
+                    horiz_end = horiz_start + f
+                    
+                    # backward propagation
+                    if mode == "max":
+                        # slice from the previous activation
+                        a_prev_slice = a_prev[vert_start:vert_end, horiz_start:horiz_end, c]
+                        # mask of the maxima
+                        mask = create_mask_from_window(a_prev_slice)
+                        # propagate gradient
+                        dA_prev[i,
+                                vert_start:vert_end,
+                                horiz_start:horiz_end,
+                                c] += mask * dA[i, h, w, c]
+
+                    elif mode == "average":
+                        # gradient to distribute
+                        da = dA[i, h, w, c]
+                        # shape of the window
+                        shape = (f, f)
+                        # distribute it equally
+                        dA_prev[i,
+                                vert_start:vert_end,
+                                horiz_start:horiz_end,
+                                c] += distribute_value(da, shape)
+                        
+    assert(dA_prev.shape == A_prev.shape)
+    
+    return dA_prev
