@@ -1,0 +1,8 @@
+#
+# requirements.txt 10/7/25
+    
+tqdm
+matplotlib
+Pillow
+tensorflow-datasets
+ipykernel 
