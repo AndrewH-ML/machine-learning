@@ -22,7 +22,7 @@ def compute_content_cost(content_output, generated_output):
     a_C = content_output[-1]
     a_G = generated_output[-1]
     
-    m, n_H, n_W, n_C = a_G.shape()
+    m, n_H, n_W, n_C = a_G.get_shape().as_list()
     
     # unroll a_C and a_G so we can compute cost 
     a_C_unrolled = tf.reshape(a_C, shape=[m, n_H*n_W, n_C])
@@ -70,7 +70,7 @@ def compute_layer_style_cost(a_S, a_G):
     
     return J_style_layer
 
-def compute_style_cost(style_image_output, generated_image_output, STYLE_LAYERS=STYLE_LAYERS):
+def compute_style_cost(style_image_output, generated_image_output, STYLE_LAYERS):
     """
     Computes the overall style cost from several chosen layers
     
@@ -128,4 +128,5 @@ def get_layer_outputs(vgg, layer_names):
     outputs = [vgg.get_layer(layer[0]).output for layer in layer_names]
 
     model = tf.keras.Model([vgg.input], outputs)
+
     return model
