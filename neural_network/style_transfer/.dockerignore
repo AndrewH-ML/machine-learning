@@ -1,0 +1,7 @@
+out_*.png
+venv/
+.env/
+.env*/
+.venv/
+.gitignore
+.git
