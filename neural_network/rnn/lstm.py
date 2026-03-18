@@ -44,7 +44,6 @@ def lstm_cell_forward(xt, h_prev, c_prev, parameters):
     #    (n_h, n_h)*(n_h, m)      (n_h, n_h)*(n_h, m)      (n_h, n_X)*(n_x, m)
     z_f = np.dot(W_fc, c_prev) + np.dot(W_fh, h_prev) + np.dot(W_fx, xt) + b_f
     # z_f, z_i, z_c are (n_h, m)
-
     f   = sigmoid(z_f) # (n_h, m)
 
     z_i = np.dot(W_ic, c_prev) + np.dot(W_ih, h_prev) + np.dot(W_ix, xt) + b_i
@@ -304,3 +303,111 @@ def lstm_cell_backward(dh_next, dc_o, cache):
 
     return gradients
     
+def lstm_backward(dh, caches):
+    """
+    Backward pass across all timesteps of the LSTM.
+
+    Arguments:
+    dh      -- upstream gradient for hidden states, shape (n_h, m, T_x)
+    caches  -- (cache_list, x) returned by lstm_forward
+
+    Returns:
+    gradients -- dictionary containing input, initial-state, and parameter gradients
+    """
+
+    caches, x =  caches
+    cache_0 = caches[0]
+
+    (
+        xt, h_prev, c_prev,
+        z_f, z_i, z_c, z_o,
+        f, i, c_i, c_o, o, h_next,
+        parameters
+    )   = cache_0 
+
+    n_x, m, T_x = x.shape
+    n_h, _  = h_next.shape
+
+    #initialize gradients to size of parameters passed in
+    dx = np.zeros((n_x, m,  T_x))        
+    dh_prev = np.zeros((n_h, m))
+    dc_prev = np.zeros((n_h, m))
+
+    dW_fh = np.zeros_like(parameters["W_fh"])
+    dW_fc = np.zeros_like(parameters["W_fc"])
+    dW_fx = np.zeros_like(parameters["W_fx"])
+    db_f = np.zeros_like(parameters["b_f"])
+
+    dW_ih = np.zeros_like(parameters["W_ih"])
+    dW_ic = np.zeros_like(parameters["W_ic"])
+    dW_ix = np.zeros_like(parameters["W_ix"])
+    db_i = np.zeros_like(parameters["b_i"])
+
+    dW_ch = np.zeros_like(parameters["W_ch"])
+    dW_cc = np.zeros_like(parameters["W_cc"])
+    dW_cx = np.zeros_like(parameters["W_cx"])
+    db_c = np.zeros_like(parameters["b_c"])
+
+    dW_oh = np.zeros_like(parameters["W_oh"])
+    dW_oc = np.zeros_like(parameters["W_oc"])
+    dW_ox = np.zeros_like(parameters["W_ox"])
+    db_o = np.zeros_like(parameters["b_o"])
+
+    for t in reversed(range(T_x)):
+        grads_t = lstm_cell_backward(
+            dh[:,:,t] + dh_prev, 
+            dc_prev,
+            caches[t]
+        )
+
+        dx[:, :, t] = grads_t["dxt"]
+        dh_prev = grads_t["dh_prev"]
+        dc_prev = grads_t["dc_prev"]
+        dW_fh += grads_t["dW_fh"]
+        dW_fc += grads_t["dW_fc"]
+        dW_fx += grads_t["dW_fx"]
+        db_f += grads_t["db_f"]
+
+        dW_ih += grads_t["dW_ih"]
+        dW_ic += grads_t["dW_ic"]
+        dW_ix += grads_t["dW_ix"]
+        db_i += grads_t["db_i"]
+
+        dW_ch += grads_t["dW_ch"]
+        dW_cc += grads_t["dW_cc"]
+        dW_cx += grads_t["dW_cx"]
+        db_c += grads_t["db_c"]
+
+        dW_oh += grads_t["dW_oh"]
+        dW_oc += grads_t["dW_oc"]
+        dW_ox += grads_t["dW_ox"]
+        db_o += grads_t["db_o"]
+
+    dh0 = dh_prev
+
+    gradients = {
+        "dx": dx,
+        "dh0": dh0,
+
+        "dW_fh": dW_fh,
+        "dW_fc": dW_fc,
+        "dW_fx": dW_fx,
+        "db_f": db_f,
+
+        "dW_ih": dW_ih,
+        "dW_ic": dW_ic,
+        "dW_ix": dW_ix,
+        "db_i": db_i,
+
+        "dW_ch": dW_ch,
+        "dW_cc": dW_cc,
+        "dW_cx": dW_cx,
+        "db_c": db_c,
+
+        "dW_oh": dW_oh,
+        "dW_oc": dW_oc,
+        "dW_ox": dW_ox,
+        "db_o": db_o,
+    }
+
+    return gradients
